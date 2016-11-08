@@ -1,7 +1,7 @@
 var chai = require('chai'),
     assert = chai.assert,
     Reflux = require('reflux-core'),
-    RefluxPromise = require('../lib'),
+    RefluxPromise = require('../lib').default,
     Q = require('q'),
     sinon = require('sinon');
 

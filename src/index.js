@@ -1,6 +1,5 @@
 function createFunctions(Reflux, PromiseFactory, catchHandler) {
-
-    const _ = Reflux.utils;
+  const _ = Reflux.utils;
 
     /**
      * Returns a Promise for the triggered action
@@ -11,63 +10,57 @@ function createFunctions(Reflux, PromiseFactory, catchHandler) {
      *   If listenAndPromise'd, then promise associated to this trigger.
      *   Otherwise, the promise is for next child action completion.
      */
-    function triggerPromise() {
-        var me = this;
-        var args = arguments;
+  function triggerPromise(...triggerArgs) {
+    const canHandlePromise =
+            this.children.indexOf('completed') >= 0 &&
+            this.children.indexOf('failed') >= 0;
 
-        var canHandlePromise =
-            this.children.indexOf("completed") >= 0 &&
-            this.children.indexOf("failed") >= 0;
-
-        var createdPromise = new PromiseFactory(function(resolve, reject) {
+    const createdPromise = new PromiseFactory((resolve, reject) => {
             // If `listenAndPromise` is listening
             // patch `promise` w/ context-loaded resolve/reject
-            if (me.willCallPromise) {
-                _.nextTick(function() {
-                    var previousPromise = me.promise;
-                    me.promise = function (inputPromise) {
-                        inputPromise.then(resolve, reject);
+      if (this.willCallPromise) {
+        _.nextTick(() => {
+          const previousPromise = this.promise;
+          this.promise = (inputPromise, ...promiseArgs) => {
+            inputPromise.then(resolve, reject);
                         // Back to your regularly schedule programming.
-                        me.promise = previousPromise;
-                        return me.promise.apply(me, arguments);
-                    };
-                    me.trigger.apply(me, args);
-                });
-                return;
-            }
-
-            if (canHandlePromise) {
-                var removeSuccess = me.completed.listen(function () {
-                    var args = Array.prototype.slice.call(arguments);
-                    removeSuccess();
-                    removeFailed();
-                    resolve(args.length > 1 ? args : args[0]);
-                });
-
-                var removeFailed = me.failed.listen(function () {
-                    var args = Array.prototype.slice.call(arguments);
-                    removeSuccess();
-                    removeFailed();
-                    reject(args.length > 1 ? args : args[0]);
-                });
-            }
-
-            _.nextTick(function () {
-                me.trigger.apply(me, args);
-            });
-
-            if (!canHandlePromise) {
-                resolve();
-            }
+            this.promise = previousPromise;
+            return this.promise(inputPromise, ...promiseArgs);
+          };
+          this.trigger(...triggerArgs);
         });
 
-        // Attach promise catch handler if provided
-        if (typeof (catchHandler) === "function") {
-            createdPromise.catch(catchHandler);
-        }
+        return;
+      }
 
-        return createdPromise;
+      if (canHandlePromise) {
+        const removeSuccess = this.completed.listen((...args) => {
+          removeSuccess();
+          removeFailed();
+          resolve(args.length > 1 ? args : args[0]);
+        });
+
+        const removeFailed = this.failed.listen((...args) => {
+          removeSuccess();
+          removeFailed();
+          reject(args.length > 1 ? args : args[0]);
+        });
+      }
+
+      _.nextTick(() => this.trigger(...triggerArgs));
+
+      if (!canHandlePromise) {
+        resolve();
+      }
+    });
+
+        // Attach promise catch handler if provided
+    if (typeof (catchHandler) === 'function') {
+      createdPromise.catch(catchHandler);
     }
+
+    return createdPromise;
+  }
 
     /**
      * Attach handlers to promise that trigger the completed and failed
@@ -75,23 +68,17 @@ function createFunctions(Reflux, PromiseFactory, catchHandler) {
      *
      * @param {Object} p The promise to attach to
      */
-    function promise(p) {
-        var me = this;
+  function promise(p) {
+    const canHandlePromise =
+            this.children.indexOf('completed') >= 0 &&
+            this.children.indexOf('failed') >= 0;
 
-        var canHandlePromise =
-            this.children.indexOf("completed") >= 0 &&
-            this.children.indexOf("failed") >= 0;
-
-        if (!canHandlePromise){
-            throw new Error("Publisher must have \"completed\" and \"failed\" child publishers");
-        }
-
-        p.then(function(response) {
-            return me.completed(response);
-        }, function(error) {
-            return me.failed(error);
-        });
+    if (!canHandlePromise) {
+      throw new Error('Publisher must have "completed" and "failed" child publishers');
     }
+
+    p.then(response => this.completed(response), error => this.failed(error));
+  }
 
     /**
      * Subscribes the given callback for action triggered, which should
@@ -99,44 +86,40 @@ function createFunctions(Reflux, PromiseFactory, catchHandler) {
      *
      * @param {Function} callback The callback to register as event handler
      */
-    function listenAndPromise(callback, bindContext) {
-        var me = this;
-        bindContext = bindContext || this;
-        this.willCallPromise = (this.willCallPromise || 0) + 1;
+  function listenAndPromise(callback, bindContext) {
+    bindContext = bindContext || this;
+    this.willCallPromise = (this.willCallPromise || 0) + 1;
 
-        var removeListen = this.listen(function() {
+    const removeListen = this.listen((...args) => {
+      if (!callback) {
+        throw new Error(`Expected a function returning a promise but got ${callback}`);
+      }
 
-            if (!callback) {
-                throw new Error("Expected a function returning a promise but got " + callback);
-            }
+      const returnedPromise = callback.apply(bindContext, args);
+      return this.promise.call(this, returnedPromise);
+    }, bindContext);
 
-            var args = arguments,
-                returnedPromise = callback.apply(bindContext, args);
-            return me.promise.call(me, returnedPromise);
-        }, bindContext);
-
-        return function () {
-          me.willCallPromise--;
-          removeListen.call(me);
-        };
-
-    }
-
-    return {
-        triggerPromise: triggerPromise,
-        promise: promise,
-        listenAndPromise: listenAndPromise
+    return function() {
+      this.willCallPromise--;
+      removeListen.call(this);
     };
+  }
+
+  return {
+    triggerPromise: triggerPromise,
+    promise: promise,
+    listenAndPromise: listenAndPromise
+  };
 }
 
 /**
  * Sets up reflux with Promise functionality
  */
 export default function(promiseFactory, catchHandler) {
-    return function(Reflux) {
-        const { triggerPromise, promise, listenAndPromise } = createFunctions(Reflux, promiseFactory, catchHandler);
-        Reflux.PublisherMethods.triggerAsync = triggerPromise;
-        Reflux.PublisherMethods.promise = promise;
-        Reflux.PublisherMethods.listenAndPromise = listenAndPromise;
-    };
+  return function(Reflux) {
+    const { triggerPromise, promise, listenAndPromise } = createFunctions(Reflux, promiseFactory, catchHandler);
+    Reflux.PublisherMethods.triggerAsync = triggerPromise;
+    Reflux.PublisherMethods.promise = promise;
+    Reflux.PublisherMethods.listenAndPromise = listenAndPromise;
+  };
 }
