@@ -1,5 +1,5 @@
 {
-  "name": "reflux-promise",
+  "name": "@gusto/reflux-promise",
   "version": "1.0.5",
   "description": "Extension to reflux-core to use Promises.",
   "main": "lib/index.js",
